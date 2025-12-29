@@ -13,6 +13,7 @@ declare global {
 }
 
 const App: React.FC = () => {
+  // App State
   const [prompt, setPrompt] = useState('');
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('1K');
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatio>('1:1');
@@ -93,7 +94,10 @@ const App: React.FC = () => {
     try {
       // Safely access the API key from the window shim
       const apiKey = (window as any).process?.env?.API_KEY;
-      if (!apiKey) throw new Error("API Key not found. Please check configuration.");
+      
+      if (!apiKey) {
+        throw new Error("API Key not found in environment configuration.");
+      }
 
       const ai = new GoogleGenAI({ apiKey });
       
@@ -154,7 +158,8 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || "Failed to generate image.");
+      const errMsg = err.message || err.toString();
+      setErrorMessage(errMsg || "Failed to generate image.");
     } finally {
       setIsGenerating(false);
     }
