@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Image as ImageIcon, Mic, MicOff, Send, Layers, ExternalLink, RefreshCw, Trash2, X } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Mic, MicOff, Send, Layers, ExternalLink, RefreshCw, Trash2, X, Pencil, Download } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { Resolution, AspectRatio, GeneratedImage } from './types';
 
@@ -21,6 +21,7 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   
   // Voice recording state
   const [isListening, setIsListening] = useState(false);
@@ -33,7 +34,8 @@ const App: React.FC = () => {
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-US';
+      // Set language to Brazilian Portuguese
+      recognitionRef.current.lang = 'pt-BR';
 
       recognitionRef.current.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
@@ -82,6 +84,14 @@ const App: React.FC = () => {
     setAttachedImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleEditImage = (img: GeneratedImage) => {
+    setAttachedImages([img.url]);
+    setPrompt(img.prompt); // Pre-fill with original prompt
+    inputRef.current?.focus();
+    // Smooth scroll to bottom to show the user the editing context
+    inputRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   const generateImage = async () => {
     if (!prompt.trim() && attachedImages.length === 0) {
       setErrorMessage("Please provide a prompt or paste an image.");
@@ -119,14 +129,21 @@ const App: React.FC = () => {
         contents.parts.push({ text: prompt });
       }
 
+      // Configure image generation
+      const imageConfig: any = {
+        imageSize: selectedResolution
+      };
+      
+      // Only set aspectRatio if not Auto
+      if (selectedAspectRatio !== 'Auto') {
+        imageConfig.aspectRatio = selectedAspectRatio;
+      }
+
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-image-preview',
         contents: contents,
         config: {
-          imageConfig: {
-            aspectRatio: selectedAspectRatio,
-            imageSize: selectedResolution
-          },
+          imageConfig: imageConfig,
           tools: [{ googleSearch: {} }]
         }
       });
@@ -213,7 +230,7 @@ const App: React.FC = () => {
               <ImageIcon className="w-3 h-3" /> Aspect Ratio
             </label>
             <div className="grid grid-cols-3 gap-2">
-              {(['1:1', '3:4', '4:3', '9:16', '16:9'] as AspectRatio[]).map((ratio) => (
+              {(['Auto', '1:1', '3:4', '4:3', '9:16', '16:9'] as AspectRatio[]).map((ratio) => (
                 <button
                   key={ratio}
                   onClick={() => setSelectedAspectRatio(ratio)}
@@ -282,13 +299,27 @@ const App: React.FC = () => {
                   <div className="absolute bottom-0 inset-x-0 p-8 bg-gradient-to-t from-black via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                     <div className="flex items-center justify-between gap-6">
                       <p className="text-zinc-200 text-sm italic font-light line-clamp-2">"{img.prompt}"</p>
-                      <a 
-                        href={img.url} 
-                        download={`nano-pro-${img.id}.png`}
-                        className="flex-shrink-0 p-4 bg-white text-black rounded-full hover:scale-110 active:scale-95 transition-all shadow-xl"
-                      >
-                        <ExternalLink className="w-5 h-5" />
-                      </a>
+                      
+                      <div className="flex gap-2">
+                         {/* Edit Button */}
+                         <button
+                          onClick={() => handleEditImage(img)}
+                          className="flex-shrink-0 p-4 bg-white/10 backdrop-blur-md text-white border border-white/20 rounded-full hover:bg-white hover:text-black hover:scale-110 active:scale-95 transition-all shadow-xl"
+                          title="Edit / Use as Reference"
+                        >
+                          <Pencil className="w-5 h-5" />
+                        </button>
+
+                        {/* Download Button */}
+                        <a 
+                          href={img.url} 
+                          download={`nano-pro-${img.id}.png`}
+                          className="flex-shrink-0 p-4 bg-white text-black rounded-full hover:scale-110 active:scale-95 transition-all shadow-xl"
+                          title="Download Image"
+                        >
+                          <Download className="w-5 h-5" />
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -322,6 +353,7 @@ const App: React.FC = () => {
               <div className="flex items-end gap-3">
                 <div className="flex-1 bg-zinc-900/80 rounded-2xl border border-white/5 focus-within:border-indigo-500/50 transition-all p-2 flex items-center gap-2">
                   <textarea
+                    ref={inputRef}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     onPaste={handlePaste}
@@ -339,7 +371,7 @@ const App: React.FC = () => {
                     className={`p-3 rounded-xl transition-all ${
                       isListening ? 'bg-red-500/20 text-red-400 animate-pulse' : 'text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800'
                     }`}
-                    title={isListening ? "Stop Listening" : "Speak Prompt"}
+                    title={isListening ? "Parar Gravação" : "Falar Prompt (Português)"}
                   >
                     {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
                   </button>
