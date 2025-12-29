@@ -25,6 +25,14 @@
             background-clip: padding-box, border-box;
         }
     </style>
+    <script>
+        // Shim process.env for browser environments to prevent crashes and provide the API Key
+        window.process = {
+            env: {
+                API_KEY: 'AlzaSyCZEHGTh53e0Kva6LM36_IRBRXM9_V0VKo'
+            }
+        };
+    </script>
 <script type="importmap">
 {
   "imports": {
