@@ -80,8 +80,11 @@ const App: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      // Use the environment variable API Key directly
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // Safely access the API key from the window shim
+      const apiKey = (window as any).process?.env?.API_KEY;
+      if (!apiKey) throw new Error("API Key not found. Please check configuration.");
+
+      const ai = new GoogleGenAI({ apiKey });
       
       const contents: { parts: any[] } = { parts: [] };
       

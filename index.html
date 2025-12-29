@@ -26,7 +26,7 @@
         }
     </style>
     <script>
-        // Shim process.env for browser environments to prevent crashes and provide the API Key
+        // Shim process.env for browser environments
         window.process = {
             env: {
                 API_KEY: 'AlzaSyCZEHGTh53e0Kva6LM36_IRBRXM9_V0VKo'
@@ -47,5 +47,6 @@
 </head>
 <body>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
 </body>
 </html>
