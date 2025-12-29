@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Image as ImageIcon, Mic, MicOff, Send, Layers, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Mic, MicOff, Send, Layers, ExternalLink, RefreshCw, Trash2, X } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { Resolution, AspectRatio, GeneratedImage } from './types';
 
@@ -16,7 +16,7 @@ const App: React.FC = () => {
   const [prompt, setPrompt] = useState('');
   const [selectedResolution, setSelectedResolution] = useState<Resolution>('1K');
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatio>('1:1');
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -59,20 +59,31 @@ const App: React.FC = () => {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setReferenceImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            if (typeof event.target?.result === 'string') {
+              setAttachedImages(prev => [...prev, event.target!.result as string]);
+            }
+          };
+          reader.readAsDataURL(blob);
+        }
+      }
     }
   };
 
+  const removeImage = (index: number) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   const generateImage = async () => {
-    if (!prompt.trim() && !referenceImage) {
-      setErrorMessage("Please provide a prompt or a reference image.");
+    if (!prompt.trim() && attachedImages.length === 0) {
+      setErrorMessage("Please provide a prompt or paste an image.");
       return;
     }
 
@@ -88,16 +99,17 @@ const App: React.FC = () => {
       
       const contents: { parts: any[] } = { parts: [] };
       
-      if (referenceImage) {
-        const base64Data = referenceImage.split(',')[1];
-        const mimeType = referenceImage.split(';')[0].split(':')[1];
+      // Add all attached images
+      attachedImages.forEach(imgData => {
+        const base64Data = imgData.split(',')[1];
+        const mimeType = imgData.split(';')[0].split(':')[1];
         contents.parts.push({
           inlineData: {
             data: base64Data,
             mimeType: mimeType
           }
         });
-      }
+      });
 
       if (prompt.trim()) {
         contents.parts.push({ text: prompt });
@@ -136,7 +148,7 @@ const App: React.FC = () => {
         };
         setHistory(prev => [newImage, ...prev]);
         setPrompt('');
-        setReferenceImage(null);
+        setAttachedImages([]);
       } else {
         throw new Error("The model did not return an image. Try a different prompt.");
       }
@@ -212,38 +224,6 @@ const App: React.FC = () => {
             </div>
           </section>
 
-          {/* Reference Image */}
-          <section className="space-y-3">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
-              <ImageIcon className="w-3 h-3" /> Reference Source
-            </label>
-            <div className="relative group">
-              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" id="ref-img" />
-              <label 
-                htmlFor="ref-img"
-                className={`w-full h-40 rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden bg-zinc-900/50 ${
-                  referenceImage ? 'border-indigo-500' : 'border-zinc-800 hover:border-zinc-700'
-                }`}
-              >
-                {referenceImage ? (
-                  <img src={referenceImage} alt="Reference" className="w-full h-full object-cover" />
-                ) : (
-                  <>
-                    <ImageIcon className="w-8 h-8 text-zinc-700 mb-2" />
-                    <span className="text-[10px] text-zinc-500 px-4 text-center">Click to upload reference image</span>
-                  </>
-                )}
-              </label>
-              {referenceImage && (
-                <button 
-                  onClick={() => setReferenceImage(null)}
-                  className="absolute top-2 right-2 p-1 bg-black/60 backdrop-blur-sm rounded-full text-zinc-300 hover:text-white"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          </section>
         </div>
 
         {history.length > 0 && (
@@ -269,7 +249,7 @@ const App: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-2xl font-light italic">Your imagination, rendered in {selectedResolution}</h2>
-                <p className="text-sm mt-2">Describe a scene or upload an image to begin.</p>
+                <p className="text-sm mt-2">Describe a scene or paste images to begin.</p>
               </div>
             </div>
           )}
@@ -315,41 +295,62 @@ const App: React.FC = () => {
         {/* Floating Controls */}
         <div className="absolute bottom-8 inset-x-0 px-6 pointer-events-none">
           <div className="max-w-4xl mx-auto w-full pointer-events-auto">
-            <div className="glass rounded-3xl p-3 flex items-end gap-3 shadow-2xl border border-white/10 relative">
-              <div className="flex-1 bg-zinc-900/80 rounded-2xl border border-white/5 focus-within:border-indigo-500/50 transition-all p-2 flex items-center gap-2">
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Tell Nano Banana Pro what to create..."
-                  className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-zinc-500 text-sm resize-none py-2 px-3 h-14 min-h-[56px] max-h-40 leading-relaxed"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      generateImage();
-                    }
-                  }}
-                />
-                <button 
-                  onClick={toggleListening}
-                  className={`p-3 rounded-xl transition-all ${
-                    isListening ? 'bg-red-500/20 text-red-400 animate-pulse' : 'text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800'
+            <div className="glass rounded-3xl p-3 shadow-2xl border border-white/10 relative flex flex-col gap-2">
+              
+              {/* Image Previews */}
+              {attachedImages.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1 px-1">
+                  {attachedImages.map((img, idx) => (
+                    <div key={idx} className="relative w-16 h-16 flex-shrink-0 group">
+                      <img src={img} alt={`Attached ${idx}`} className="w-full h-full object-cover rounded-lg border border-white/20" />
+                      <button
+                        onClick={() => removeImage(idx)}
+                        className="absolute -top-1 -right-1 bg-zinc-900 rounded-full text-zinc-400 hover:text-white border border-white/10 p-0.5 shadow-md"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-end gap-3">
+                <div className="flex-1 bg-zinc-900/80 rounded-2xl border border-white/5 focus-within:border-indigo-500/50 transition-all p-2 flex items-center gap-2">
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    onPaste={handlePaste}
+                    placeholder="Describe what to create (paste images here)..."
+                    className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-zinc-500 text-sm resize-none py-2 px-3 h-14 min-h-[56px] max-h-40 leading-relaxed"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        generateImage();
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={toggleListening}
+                    className={`p-3 rounded-xl transition-all ${
+                      isListening ? 'bg-red-500/20 text-red-400 animate-pulse' : 'text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800'
+                    }`}
+                    title={isListening ? "Stop Listening" : "Speak Prompt"}
+                  >
+                    {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                  </button>
+                </div>
+                <button
+                  disabled={isGenerating || (!prompt.trim() && attachedImages.length === 0)}
+                  onClick={generateImage}
+                  className={`p-4 h-14 w-14 rounded-2xl flex items-center justify-center transition-all ${
+                    isGenerating || (!prompt.trim() && attachedImages.length === 0)
+                    ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-xl shadow-indigo-500/40 active:scale-95'
                   }`}
-                  title={isListening ? "Stop Listening" : "Speak Prompt"}
                 >
-                  {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                  {isGenerating ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
                 </button>
               </div>
-              <button
-                disabled={isGenerating || (!prompt.trim() && !referenceImage)}
-                onClick={generateImage}
-                className={`p-4 h-14 w-14 rounded-2xl flex items-center justify-center transition-all ${
-                  isGenerating || (!prompt.trim() && !referenceImage)
-                  ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
-                  : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-xl shadow-indigo-500/40 active:scale-95'
-                }`}
-              >
-                {isGenerating ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
-              </button>
             </div>
             {errorMessage && (
               <div className="mt-4 px-4 py-2 bg-red-500/10 border border-red-500/40 rounded-xl text-red-400 text-[10px] font-bold text-center uppercase tracking-widest animate-in fade-in zoom-in">
