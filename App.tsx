@@ -12,6 +12,95 @@ declare global {
   }
 }
 
+// --- CRC Table for PNG Metadata Injection ---
+const crcTable: number[] = [];
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let k = 0; k < 8; k++) {
+    if (c & 1) {
+      c = 0xedb88320 ^ (c >>> 1);
+    } else {
+      c = c >>> 1;
+    }
+  }
+  crcTable[n] = c;
+}
+
+function crc32(buf: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = crcTable[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return crc ^ 0xffffffff;
+}
+
+// --- Helper to add tEXt chunk to PNG ---
+const addPngMetadata = async (base64Data: string, key: string, text: string): Promise<Blob> => {
+  // Convert base64 to binary
+  const binaryString = atob(base64Data.split(',')[1]);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  // Check PNG signature
+  if (bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) {
+    // Not a PNG, return original blob (or convert via canvas if needed, but assuming PNG here)
+    const res = await fetch(base64Data);
+    return res.blob();
+  }
+
+  // Construct tEXt chunk
+  // Length (4 bytes) + Type (4 bytes) + Data (Key + \0 + Text) + CRC (4 bytes)
+  const encoder = new TextEncoder();
+  const keyBytes = encoder.encode(key);
+  const textBytes = encoder.encode(text);
+  const chunkData = new Uint8Array(keyBytes.length + 1 + textBytes.length);
+  chunkData.set(keyBytes, 0);
+  chunkData[keyBytes.length] = 0; // Null separator
+  chunkData.set(textBytes, keyBytes.length + 1);
+
+  const chunkType = encoder.encode('tEXt');
+  const crcInput = new Uint8Array(chunkType.length + chunkData.length);
+  crcInput.set(chunkType, 0);
+  crcInput.set(chunkData, chunkType.length);
+  
+  const crcVal = crc32(crcInput);
+  
+  // Assemble the chunk bytes
+  const chunkLength = chunkData.length;
+  const fullChunk = new Uint8Array(4 + 4 + chunkLength + 4);
+  const view = new DataView(fullChunk.buffer);
+  
+  view.setUint32(0, chunkLength, false); // Length
+  fullChunk.set(chunkType, 4); // Type
+  fullChunk.set(chunkData, 8); // Data
+  view.setUint32(8 + chunkLength, crcVal, false); // CRC
+
+  // Insert after IHDR (usually ends at byte 33 if standard)
+  // Simple PNG parsing: Find end of IHDR
+  let pos = 8;
+  while (pos < bytes.length) {
+    const len = new DataView(bytes.buffer).getUint32(pos, false);
+    const type = String.fromCharCode(bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]);
+    if (type === 'IHDR') {
+      pos += 12 + len; // Move past IHDR
+      break;
+    }
+    pos += 12 + len;
+  }
+
+  // Create new array
+  const newBytes = new Uint8Array(bytes.length + fullChunk.length);
+  newBytes.set(bytes.slice(0, pos), 0);
+  newBytes.set(fullChunk, pos);
+  newBytes.set(bytes.slice(pos), pos + fullChunk.length);
+
+  return new Blob([newBytes], { type: 'image/png' });
+};
+
+
 const App: React.FC = () => {
   // App State
   const [prompt, setPrompt] = useState('');
@@ -88,8 +177,30 @@ const App: React.FC = () => {
     setAttachedImages([img.url]);
     setPrompt(img.prompt); // Pre-fill with original prompt
     inputRef.current?.focus();
-    // Smooth scroll to bottom to show the user the editing context
     inputRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleDownload = async (img: GeneratedImage) => {
+    try {
+      // Create a blob with the metadata injected
+      const blob = await addPngMetadata(img.url, 'Description', img.prompt);
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gerador-apolinario-${img.id}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Error generating download with metadata", e);
+      // Fallback
+      const a = document.createElement('a');
+      a.href = img.url;
+      a.download = `gerador-apolinario-${img.id}.png`;
+      a.click();
+    }
   };
 
   const generateImage = async () => {
@@ -102,18 +213,33 @@ const App: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      // Safely access the API key from the window shim
       const apiKey = (window as any).process?.env?.API_KEY;
-      
-      if (!apiKey) {
-        throw new Error("API Key not found in environment configuration.");
-      }
+      if (!apiKey) throw new Error("API Key not found.");
 
       const ai = new GoogleGenAI({ apiKey });
+
+      // Step 1: Translate/Refine Prompt using Gemini Flash (Fast)
+      let refinedPrompt = prompt;
+      if (prompt.trim()) {
+         try {
+           const translationResponse = await ai.models.generateContent({
+             model: 'gemini-3-flash-preview',
+             contents: `Translate the following Portuguese prompt into a detailed, high-quality English image generation prompt. Maintain the artistic intent but enhance clarity for an AI generator. 
+             
+             Input: "${prompt}"`,
+           });
+           if (translationResponse.text) {
+             refinedPrompt = translationResponse.text;
+             console.log("Refined Prompt:", refinedPrompt);
+           }
+         } catch (tError) {
+           console.warn("Translation failed, using original prompt", tError);
+         }
+      }
       
       const contents: { parts: any[] } = { parts: [] };
       
-      // Add all attached images
+      // Add attached images
       attachedImages.forEach(imgData => {
         const base64Data = imgData.split(',')[1];
         const mimeType = imgData.split(';')[0].split(':')[1];
@@ -125,8 +251,8 @@ const App: React.FC = () => {
         });
       });
 
-      if (prompt.trim()) {
-        contents.parts.push({ text: prompt });
+      if (refinedPrompt.trim()) {
+        contents.parts.push({ text: refinedPrompt });
       }
 
       // Configure image generation
@@ -134,7 +260,6 @@ const App: React.FC = () => {
         imageSize: selectedResolution
       };
       
-      // Only set aspectRatio if not Auto
       if (selectedAspectRatio !== 'Auto') {
         imageConfig.aspectRatio = selectedAspectRatio;
       }
@@ -151,7 +276,6 @@ const App: React.FC = () => {
       let foundImageUrl = '';
       if (response.candidates?.[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
-          // Find the image part as it may not be the first part
           if (part.inlineData) {
             foundImageUrl = `data:image/png;base64,${part.inlineData.data}`;
             break;
@@ -163,7 +287,9 @@ const App: React.FC = () => {
         const newImage: GeneratedImage = {
           id: Date.now().toString(),
           url: foundImageUrl,
-          prompt: prompt || 'Vision from reference',
+          // Store original prompt so user sees what they asked for, 
+          // even though we used English to generate it.
+          prompt: prompt || 'Vision from reference', 
           resolution: selectedResolution,
           timestamp: Date.now()
         };
@@ -188,6 +314,29 @@ const App: React.FC = () => {
     }
   };
 
+  // Visual representation of ratios
+  const getAspectRatioPreview = (ratio: AspectRatio) => {
+    let width = 'w-6';
+    let height = 'h-6';
+    let label = ratio;
+    
+    switch(ratio) {
+      case '1:1': width='w-6'; height='h-6'; break;
+      case '4:3': width='w-8'; height='h-6'; break;
+      case '3:4': width='w-6'; height='h-8'; break;
+      case '16:9': width='w-10'; height='h-5.5'; break;
+      case '9:16': width='w-5.5'; height='h-10'; break;
+      case 'Auto': width='w-6'; height='h-6'; break;
+    }
+
+    return (
+      <div className="flex flex-col items-center gap-1.5 w-full">
+        <div className={`border-2 ${selectedAspectRatio === ratio ? 'border-indigo-400 bg-indigo-500/20' : 'border-zinc-600 bg-zinc-800'} rounded-sm transition-all ${width} ${height} ${ratio === 'Auto' ? 'border-dashed' : ''}`} />
+        <span className="text-[10px] font-medium text-zinc-400">{label}</span>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-zinc-950 text-zinc-100">
       {/* Sidebar - Control Panel */}
@@ -197,7 +346,7 @@ const App: React.FC = () => {
             <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/20">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-lg font-bold tracking-tight">Nano Banana Pro 3</h1>
+            <h1 className="text-lg font-bold tracking-tight">Gerador Apolinario</h1>
           </div>
         </div>
 
@@ -234,13 +383,14 @@ const App: React.FC = () => {
                 <button
                   key={ratio}
                   onClick={() => setSelectedAspectRatio(ratio)}
-                  className={`py-2 px-1 rounded-lg text-xs font-medium transition-all border ${
+                  className={`p-2 rounded-xl transition-all border flex items-center justify-center min-h-[60px] ${
                     selectedAspectRatio === ratio 
-                    ? 'bg-indigo-600 border-indigo-400 text-white shadow-md' 
-                    : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                    ? 'bg-indigo-900/40 border-indigo-500 shadow-md' 
+                    : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800'
                   }`}
+                  title={ratio}
                 >
-                  {ratio}
+                  {getAspectRatioPreview(ratio)}
                 </button>
               ))}
             </div>
@@ -280,7 +430,7 @@ const App: React.FC = () => {
             <div className="max-w-4xl mx-auto w-full aspect-video bg-zinc-900/50 rounded-3xl border border-zinc-800 flex flex-col items-center justify-center gap-4 animate-pulse">
               <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
               <div className="text-center">
-                <p className="text-zinc-300 font-medium">Nano Banana Pro is painting...</p>
+                <p className="text-zinc-300 font-medium">Gerador Apolinario is painting...</p>
                 <p className="text-xs text-zinc-500 mt-1">Generating high-fidelity {selectedResolution} results</p>
               </div>
             </div>
@@ -311,14 +461,13 @@ const App: React.FC = () => {
                         </button>
 
                         {/* Download Button */}
-                        <a 
-                          href={img.url} 
-                          download={`nano-pro-${img.id}.png`}
+                        <button 
+                          onClick={() => handleDownload(img)}
                           className="flex-shrink-0 p-4 bg-white text-black rounded-full hover:scale-110 active:scale-95 transition-all shadow-xl"
-                          title="Download Image"
+                          title="Download Image with Metadata"
                         >
                           <Download className="w-5 h-5" />
-                        </a>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -357,7 +506,7 @@ const App: React.FC = () => {
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     onPaste={handlePaste}
-                    placeholder="Describe what to create (paste images here)..."
+                    placeholder="Descreva sua imagem em português..."
                     className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-zinc-500 text-sm resize-none py-2 px-3 h-14 min-h-[56px] max-h-40 leading-relaxed"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {

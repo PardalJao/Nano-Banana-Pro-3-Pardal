@@ -1,5 +1,5 @@
 {
-  "name": "Nano Banana Pro Creative Studio",
+  "name": "Gerador Apolinario",
   "description": "A high-end creative workspace for generating and editing ultra-high-resolution images (1K-4K) using the Nano Banana 3 Pro (Gemini 3 Pro Image) model, supporting text, audio, and reference image inputs.",
   "requestFramePermissions": [
     "camera",
