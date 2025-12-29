@@ -1,19 +1,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Image as ImageIcon, Mic, MicOff, Send, Layers, ExternalLink, RefreshCw, Trash2, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Mic, MicOff, Send, Layers, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { Resolution, AspectRatio, GeneratedImage } from './types';
 
-// Extend window for Speech Recognition and AI Studio
-// Fixed: Using AIStudio interface name and removing readonly to match environment declaration modifiers.
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
-
+// Extend window for Speech Recognition
 declare global {
   interface Window {
-    aistudio: AIStudio;
     SpeechRecognition: any;
     webkitSpeechRecognition: any;
   }
@@ -27,30 +20,12 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isKeySelected, setIsKeySelected] = useState<boolean | null>(null);
   
   // Voice recording state
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    // Check if API key is selected on mount as mandatory step for Pro models
-    const checkKey = async () => {
-      if (window.aistudio) {
-        try {
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setIsKeySelected(hasKey);
-        } catch (e) {
-          console.error("Error checking key selection:", e);
-          setIsKeySelected(false);
-        }
-      } else {
-        // Fallback if environment doesn't provide aistudio (not expected in this context)
-        setIsKeySelected(true);
-      }
-    };
-    checkKey();
-
     // Initialize Speech Recognition
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -84,14 +59,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleOpenSelectKey = async () => {
-    if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      // Assume success after opening dialog to prevent race conditions
-      setIsKeySelected(true);
-    }
-  };
-
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -113,7 +80,7 @@ const App: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      // Create fresh instance right before call to use the latest API key from the dialog
+      // Use the environment variable API Key directly
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const contents: { parts: any[] } = { parts: [] };
@@ -172,13 +139,7 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       console.error(err);
-      if (err.message?.includes("Requested entity was not found")) {
-        // Reset key selection state and prompt for re-selection on auth errors
-        setIsKeySelected(false);
-        setErrorMessage("API Authorization expired or invalid project. Please re-select your paid API key.");
-      } else {
-        setErrorMessage(err.message || "Failed to generate image.");
-      }
+      setErrorMessage(err.message || "Failed to generate image.");
     } finally {
       setIsGenerating(false);
     }
@@ -190,48 +151,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Mandatory API Key Selection screen
-  if (isKeySelected === false) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
-        <div className="max-w-md w-full glass rounded-[2.5rem] p-10 border border-white/10 text-center space-y-8 shadow-2xl">
-          <div className="mx-auto w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <ShieldCheck className="w-10 h-10 text-white" />
-          </div>
-          <div className="space-y-4">
-            <h2 className="text-3xl font-bold text-white tracking-tight">Setup Required</h2>
-            <p className="text-zinc-400 text-sm leading-relaxed">
-              To use <span className="text-indigo-400 font-semibold">Gemini 3 Pro</span> image generation, you must select an API key from a paid GCP project.
-            </p>
-          </div>
-          <div className="bg-zinc-900/50 rounded-2xl p-4 border border-zinc-800 text-left">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-zinc-500 leading-normal">
-                Make sure billing is enabled for your project. Visit the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">billing documentation</a> for details.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleOpenSelectKey}
-            className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl transition-all shadow-xl shadow-indigo-500/30 active:scale-95 flex items-center justify-center gap-2"
-          >
-            Select Paid API Key
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Initial loading state
-  if (isKeySelected === null) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-zinc-950 text-zinc-100">
       {/* Sidebar - Control Panel */}
@@ -241,15 +160,8 @@ const App: React.FC = () => {
             <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/20">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-lg font-bold tracking-tight">Banana Pro 3</h1>
+            <h1 className="text-lg font-bold tracking-tight">Nano Banana Pro 3</h1>
           </div>
-          <button 
-            onClick={handleOpenSelectKey} 
-            title="Configure API Key"
-            className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
         </div>
 
         <div className="space-y-6">
