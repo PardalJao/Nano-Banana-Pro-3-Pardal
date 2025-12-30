@@ -204,6 +204,12 @@ const App: React.FC = () => {
   };
 
   const generateImage = async () => {
+    const apiKey = (window as any).process?.env?.API_KEY;
+    if (!apiKey || apiKey.includes('INSERT')) {
+      setErrorMessage("Please edit index.html and replace the API Key placeholders with your valid key.");
+      return;
+    }
+
     if (!prompt.trim() && attachedImages.length === 0) {
       setErrorMessage("Please provide a prompt or paste an image.");
       return;
@@ -213,9 +219,6 @@ const App: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      const apiKey = (window as any).process?.env?.API_KEY;
-      if (!apiKey) throw new Error("API Key not found.");
-
       const ai = new GoogleGenAI({ apiKey });
 
       // Step 1: Translate/Refine Prompt using Gemini Flash (Fast)
